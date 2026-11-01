@@ -23,6 +23,8 @@
     redistribute: false,  // když jedné suroviny chybí, dorovnat ostatními
     noOverflow: true,     // nepřeplnit sklad cílové vesnice (jen vlastní cíl)
     minSend: 1000,        // menší zásilky neposílat
+    pauseMin: 10,         // „Poslat vše“: náhodná pauza mezi zásilkami od … (s)
+    pauseMax: 20,         // … do (s)
   };
   const COIN = { wood: 28000, stone: 30000, iron: 25000 };   // cena 1 mince na CZ světech
   const RES = ['wood', 'stone', 'iron'];
@@ -393,6 +395,7 @@
           <label>Min. zásilka <input type="number" data-min min="0" step="500" style="width:70px"></label>
           <label><input type="checkbox" data-redis> dorovnat, když jedné suroviny chybí</label>
           <label><input type="checkbox" data-noover> nepřeplnit sklad cíle</label>
+          <label>Pauza u „Poslat vše“ <input type="number" data-pmin min="0" step="1" style="width:50px"> – <input type="number" data-pmax min="0" step="1" style="width:50px"> s (náhodně)</label>
         </div>
         <div class="row2">
           <button type="button" class="btn" data-load>🔄 Načíst vesnice</button>
@@ -405,6 +408,7 @@
       <div class="ft">
         <span class="st" data-st></span>
         <button type="button" class="btn big" data-next>▶ Poslat další</button>
+        <button type="button" class="btn big" data-sendall>⏩ Poslat vše</button>
       </div>`;
     document.body.appendChild(w);
     ui = { w, q: s => w.querySelector(s) };
@@ -412,6 +416,7 @@
     ui.q('[data-close]').onclick = () => { w.style.display = 'none'; };
     ui.q('[data-load]').onclick = () => reload();
     ui.q('[data-next]').onclick = () => sendNext();
+    ui.q('[data-sendall]').onclick = () => sendAll();
     ui.q('[data-all]').onclick = () => { cfg.off = []; saveCfg(); render(); };
     ui.q('[data-none]').onclick = () => { cfg.off = villages.map(v => v.id); saveCfg(); render(); };
 
@@ -423,6 +428,8 @@
     bindNum('[data-reserve]', 'reserve', 0);
     bindNum('[data-cap]', 'cap', 100);
     bindNum('[data-min]', 'minSend', 0);
+    bindNum('[data-pmin]', 'pauseMin', 0);
+    bindNum('[data-pmax]', 'pauseMax', 0);
     const bindChk = (sel, key) => { const el = ui.q(sel); el.checked = !!cfg[key]; el.onchange = () => { cfg[key] = el.checked; saveCfg(); render(); }; };
     bindChk('[data-redis]', 'redistribute');
     bindChk('[data-noover]', 'noOverflow');
@@ -541,12 +548,17 @@
       const tr = ui.w.querySelector(`[data-src="${nx.v.id}"]`);
       if (tr) tr.closest('tr').classList.add('next');
     }
-    b.disabled = !nx || busy;
+    b.disabled = !nx || busy || sendingAll;
     b.textContent = nx ? `▶ Poslat další (${left}) – ${nx.v.name}` : '▶ Poslat další';
+    const a = ui.q('[data-sendall]');
+    a.disabled = !sendingAll && !nx;
+    a.textContent = sendingAll ? '⏹ Zastavit' : nx ? `⏩ Poslat vše (${left})` : '⏩ Poslat vše';
+    a.style.background = sendingAll ? '#8b0000' : '';
+    a.style.color = sendingAll ? '#fff' : '';
   }
 
   async function doSend(row, target) {
-    if (busy || !target || !target.id) return;
+    if (busy || !target || !target.id) return { ok: false, msg: 'busy' };
     busy = true;
     ui.q('[data-next]').disabled = true;
     setStatus(`Posílám z ${row.v.name}…`);
@@ -560,7 +572,53 @@
     }
     busy = false;
     setStatus((res.ok ? '✅ ' : '❌ ') + `${row.v.name}: ${res.msg}`);
-    gameMsg(`${row.v.name}: ${res.msg}`, !res.ok);
+    if (!sendingAll) gameMsg(`${row.v.name}: ${res.msg}`, !res.ok);
+    render();
+    return res;
+  }
+
+  // ⏩ Poslat vše: zásilky jedna po druhé s náhodnou pauzou; zastaví se při ochraně proti botům nebo 3 chybách po sobě
+  let sendingAll = false;
+  async function sendAll() {
+    if (sendingAll) { sendingAll = false; setStatus('Zastavuji…'); return; }   // druhé kliknutí = stop
+    const { target, rows } = computePlan();
+    if (!target || target.unknown || !target.id) return;
+    const todo = rows.filter(r => r.on && r.total > 0 && !sent.has(r.v.id));
+    if (!todo.length) return;
+    const tot = todo.reduce((a, r) => a + r.total, 0);
+    const pMin = Math.min(cfg.pauseMin, cfg.pauseMax), pMax = Math.max(cfg.pauseMin, cfg.pauseMax);
+    const estMin = Math.round((todo.length - 1) * (pMin + pMax) / 2 / 60);
+    if (!confirm(`Poslat suroviny z ${todo.length} vesnic do ${target.name} (${target.x}|${target.y})?\nCelkem ${fmt(tot)} surovin.\n` +
+      `Mezi zásilkami náhodně ${pMin}–${pMax} s` + (estMin ? ` (celkem asi ${estMin} min)` : '') + '. Nech okno otevřené.')) return;
+    sendingAll = true;
+    render();
+    let fails = 0, done = 0, bad = 0;
+    while (sendingAll) {
+      const plan = computePlan();
+      const nx = nextRow(plan.rows);
+      if (!nx) break;
+      setStatus(`⏩ Posílám ${done + bad + 1}/${todo.length}: ${nx.v.name}…`);
+      const res = await doSend(nx, plan.target);
+      if (res.ok) { done++; fails = 0; }
+      else {
+        bad++; fails++;
+        if (/bot|ochran|captcha/i.test(res.msg)) { setStatus('⚠️ Ochrana proti botům – zastaveno. Vyřeš ji ve hře.'); break; }
+        if (fails >= 3) { setStatus('⚠️ 3 chyby po sobě – zastaveno: ' + res.msg); break; }
+      }
+      // náhodná pauza před další zásilkou (s odpočtem); poslední zásilka už nečeká
+      if (sendingAll && nextRow(computePlan().rows)) {
+        const end = Date.now() + (pMin + Math.random() * (pMax - pMin)) * 1000;
+        while (sendingAll && Date.now() < end) {
+          setStatus(`⏩ Odesláno ${done}/${todo.length}${bad ? ` (chyb ${bad})` : ''} · další za ${Math.ceil((end - Date.now()) / 1000)} s…`);
+          await sleep(Math.min(500, Math.max(0, end - Date.now())));
+        }
+      }
+    }
+    const stopped = !sendingAll;
+    sendingAll = false;
+    const msg = `${stopped ? 'Zastaveno' : 'Hotovo'} – odesláno z ${done} vesnic` + (bad ? `, ${bad} se nepovedlo` : '') + '.';
+    if (!/⚠️/.test(ui.q('[data-st]').textContent)) setStatus((bad ? '⚠️ ' : '✅ ') + msg);
+    gameMsg(msg, bad > 0);
     render();
   }
 
