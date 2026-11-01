@@ -219,7 +219,7 @@
 
     const sumS = vs.reduce((a, v) => a + v.storage, 0);
     const sur = new Map(), def = new Map();
-    for (const r of RES) plan.f[r] = vs.reduce((a, v) => a + (v[r] || 0), 0) / sumS;
+    for (const r of RES) plan.f[r] = Math.min(1, vs.reduce((a, v) => a + (v[r] || 0), 0) / sumS);
     for (const v of vs) {
       const s = {}, d = {};
       const tol = v.storage * cfg.tolerance / 100;
@@ -325,15 +325,28 @@
       #dkb .ic{display:inline-block;width:12px;height:12px;vertical-align:middle;margin:0 2px 0 4px;border-radius:2px}
       #dkb .ft{padding:8px 10px;border-top:1px solid #7d510f;display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:#ead6a6;border-radius:0 0 6px 6px}
       #dkb .ft .st{flex:1;min-width:160px}
+      #dkb .optbox{margin-bottom:8px;background:#fff8e6;border:1px solid #e3d3a6;border-radius:4px;padding:2px 8px}
+      #dkb .optbox > summary{cursor:pointer;font-weight:bold;padding:4px 0}
+      #dkb .optbox .opts{border:none;background:none;padding:4px 0;margin:0}
       @media (max-width:700px){
-        #dkb{inset:0;border-radius:0}
-        #dkb table,#dkb thead,#dkb tbody,#dkb tr,#dkb td{display:block;width:auto}
+        #dkb{inset:0;border-radius:0;font-size:12px}
+        /* tlačítka hned pod nadpisem – dole je překrývá lišta aplikace (Menu / Hra / Mapa / Účet) */
+        #dkb .hd{order:-2;padding:6px 8px}
+        #dkb .ft{order:-1;border-top:none;border-bottom:1px solid #7d510f;border-radius:0;padding:6px 8px;gap:6px}
+        #dkb .ft .st{flex-basis:100%;order:3;font-size:11px;min-width:0}
+        #dkb .big{flex:1 1 0;width:auto;font-size:14px !important;padding:8px 6px !important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        #dkb .bd{padding:6px 8px 120px}
+        #dkb .btn{font-size:12px;padding:4px 8px}
+        #dkb table,#dkb thead,#dkb tbody,#dkb tr{display:block;width:auto}
         #dkb thead{display:none}
-        #dkb tr{border:1px solid #e3d3a6;border-radius:6px;margin-bottom:6px;padding:4px 6px;background:#fff8e6}
-        #dkb td{border:none;padding:2px 0;white-space:normal}
+        #dkb tr{border:1px solid #e3d3a6;border-radius:6px;margin-bottom:4px;padding:3px 6px;background:#fff8e6}
+        /* buňky vedle sebe -> karta má 2–3 řádky místo 6 */
+        #dkb td{display:inline-block;border:none;padding:1px 8px 1px 0;white-space:nowrap;vertical-align:middle}
         #dkb td.n{text-align:left}
-        #dkb td[data-l]::before{content:attr(data-l) ': ';color:#6b5a3a;font-size:11px}
-        #dkb .big{width:100%}
+        #dkb td[data-l]::before{content:attr(data-l) ': ';color:#6b5a3a;font-size:10px}
+        #dkb td:last-child .btn{padding:3px 10px}
+        #dkb .sum{padding:4px 6px;font-size:12px}
+        #dkb .sum .o{display:none}
       }`;
     document.head.appendChild(st);
   }
@@ -345,13 +358,15 @@
     w.innerHTML = `
       <div class="hd"><b>⚖️ Balanc surovin</b><button type="button" class="btn" data-close>✖</button></div>
       <div class="bd">
-        <div class="opts">
+        <details class="optbox"><summary>⚙️ Nastavení</summary>
+          <div class="opts">
           <label>Nechat ve vesnici aspoň <input type="number" data-reserve min="0" step="1000" style="width:80px"> každé</label>
           <label>Neřešit rozdíl pod <input type="number" data-tol min="0" max="50" step="1" style="width:50px"> % skladu</label>
           <label>Min. zásilka <input type="number" data-min min="0" step="500" style="width:70px"></label>
           <label>Nosnost obchodníka <input type="number" data-cap min="100" step="100" style="width:70px"></label>
           <label>Pauza u „Poslat vše“ <input type="number" data-pmin min="0" style="width:50px"> – <input type="number" data-pmax min="0" style="width:50px"> s</label>
         </div>
+        </details>
         <div class="row2">
           <button type="button" class="btn" data-load>🔄 Načíst vesnice</button>
         </div>

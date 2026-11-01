@@ -188,7 +188,7 @@
         const res = {};
         for (const k of RES) {
           const el = doc.querySelector('#' + k);
-          res[k] = gv && gv[k] != null ? Math.floor(gv[k]) : (el ? num(el.textContent) : 0);
+          res[k] = gv && gv[k] != null ? Math.floor(gv[k]) : (el ? num(el.textContent) : (v[k] || 0));
         }
         const st = doc.querySelector('#storage');
         const mer = doc.querySelector('#market_merchant_available_count');
@@ -359,15 +359,28 @@
       #dks .ft{padding:8px 10px;border-top:1px solid #7d510f;display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:#ead6a6;border-radius:0 0 6px 6px}
       #dks .ft .st{flex:1;min-width:160px}
       #dks .ic{display:inline-block;width:14px;height:14px;vertical-align:middle;margin-right:2px;border-radius:2px}
+      #dks .optbox{margin-bottom:8px;background:#fff8e6;border:1px solid #e3d3a6;border-radius:4px;padding:2px 8px}
+      #dks .optbox > summary{cursor:pointer;font-weight:bold;padding:4px 0}
+      #dks .optbox .opts{border:none;background:none;padding:4px 0;margin:0}
       @media (max-width:700px){
-        #dks{inset:0;border-radius:0}
-        #dks table,#dks thead,#dks tbody,#dks tr,#dks td{display:block;width:auto}
+        #dks{inset:0;border-radius:0;font-size:12px}
+        /* tlačítka hned pod nadpisem – dole je překrývá lišta aplikace (Menu / Hra / Mapa / Účet) */
+        #dks .hd{order:-2;padding:6px 8px}
+        #dks .ft{order:-1;border-top:none;border-bottom:1px solid #7d510f;border-radius:0;padding:6px 8px;gap:6px}
+        #dks .ft .st{flex-basis:100%;order:3;font-size:11px;min-width:0}
+        #dks .big{flex:1 1 0;width:auto;font-size:14px !important;padding:8px 6px !important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        #dks .bd{padding:6px 8px 120px}
+        #dks .btn{font-size:12px;padding:4px 8px}
+        #dks table,#dks thead,#dks tbody,#dks tr{display:block;width:auto}
         #dks thead{display:none}
-        #dks tr{border:1px solid #e3d3a6;border-radius:6px;margin-bottom:6px;padding:4px 6px;background:#fff8e6}
-        #dks td{border:none;padding:2px 0;white-space:normal}
+        #dks tr{border:1px solid #e3d3a6;border-radius:6px;margin-bottom:4px;padding:3px 6px;background:#fff8e6}
+        /* buňky vedle sebe -> karta má 2–3 řádky místo 6 */
+        #dks td{display:inline-block;border:none;padding:1px 8px 1px 0;white-space:nowrap;vertical-align:middle}
         #dks td.n{text-align:left}
-        #dks td[data-l]::before{content:attr(data-l) ': ';color:#6b5a3a;font-size:11px}
-        #dks .big{width:100%}
+        #dks td[data-l]::before{content:attr(data-l) ': ';color:#6b5a3a;font-size:10px}
+        #dks td:last-child .btn{padding:3px 10px}
+        #dks .sum{padding:4px 6px;font-size:12px}
+        #dks .sum .o{display:none}
       }`;
     document.head.appendChild(st);
   }
@@ -388,7 +401,8 @@
           <span>nebo souřadnice</span><input type="text" data-tcoord placeholder="500|500" style="width:80px">
           <span class="o" data-tinfo></span>
         </div>
-        <div class="opts">
+        <details class="optbox"><summary>⚙️ Nastavení</summary>
+          <div class="opts">
           <label>Poměr <select data-ratio><option value="third">1/3 dřevo · 1/3 hlína · 1/3 železo</option><option value="coin">na mince (28 : 30 : 25)</option></select></label>
           <label>Nechat ve vesnici <input type="number" data-reserve min="0" step="1000" style="width:80px"> každé</label>
           <label>Nosnost obchodníka <input type="number" data-cap min="100" step="100" style="width:70px"></label>
@@ -397,6 +411,7 @@
           <label><input type="checkbox" data-noover> nepřeplnit sklad cíle</label>
           <label>Pauza u „Poslat vše“ <input type="number" data-pmin min="0" step="1" style="width:50px"> – <input type="number" data-pmax min="0" step="1" style="width:50px"> s (náhodně)</label>
         </div>
+        </details>
         <div class="row2">
           <button type="button" class="btn" data-load>🔄 Načíst vesnice</button>
           <button type="button" class="btn" data-all>✔ všechny</button>
