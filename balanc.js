@@ -295,6 +295,7 @@
   // ================= UI =================
   let ui = null, busy = false, sendingAll = false;
 
+
   function injectStyles() {
     const st = document.createElement('style');
     st.textContent = `
@@ -538,9 +539,6 @@
     const todo = plan.ships.filter(s => !sent.has(s.key));
     if (!todo.length) return;
     const pMin = Math.min(cfg.pauseMin, cfg.pauseMax), pMax = Math.max(cfg.pauseMin, cfg.pauseMax);
-    const estMin = Math.round((todo.length - 1) * (pMin + pMax) / 2 / 60);
-    if (!confirm(`Odeslat ${todo.length} zásilek na vyrovnání surovin?\nMezi zásilkami náhodně ${pMin}–${pMax} s` +
-      (estMin ? ` (celkem asi ${estMin} min)` : '') + '. Nech okno otevřené.')) return;
     sendingAll = true;
     render();
     let fails = 0, done = 0, bad = 0;

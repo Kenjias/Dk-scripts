@@ -594,17 +594,14 @@
 
   // ⏩ Poslat vše: zásilky jedna po druhé s náhodnou pauzou; zastaví se při ochraně proti botům nebo 3 chybách po sobě
   let sendingAll = false;
+
   async function sendAll() {
     if (sendingAll) { sendingAll = false; setStatus('Zastavuji…'); return; }   // druhé kliknutí = stop
     const { target, rows } = computePlan();
     if (!target || target.unknown || !target.id) return;
     const todo = rows.filter(r => r.on && r.total > 0 && !sent.has(r.v.id));
     if (!todo.length) return;
-    const tot = todo.reduce((a, r) => a + r.total, 0);
     const pMin = Math.min(cfg.pauseMin, cfg.pauseMax), pMax = Math.max(cfg.pauseMin, cfg.pauseMax);
-    const estMin = Math.round((todo.length - 1) * (pMin + pMax) / 2 / 60);
-    if (!confirm(`Poslat suroviny z ${todo.length} vesnic do ${target.name} (${target.x}|${target.y})?\nCelkem ${fmt(tot)} surovin.\n` +
-      `Mezi zásilkami náhodně ${pMin}–${pMax} s` + (estMin ? ` (celkem asi ${estMin} min)` : '') + '. Nech okno otevřené.')) return;
     sendingAll = true;
     render();
     let fails = 0, done = 0, bad = 0;
