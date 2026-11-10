@@ -17,6 +17,7 @@
     cap: 1000,        // nosnost jednoho obchodníka
     minSend: 1000,    // menší zásilky neposílat
     tolerance: 3,     // rozdíl menší než tolik % skladu se neřeší
+    mix: true,        // vyrovnávat i suroviny mezi sebou ve vesnici (nedostatková má přednost, jinou surovinu nad ni neposílat)
     pauseMin: 10,     // „Poslat vše“: náhodná pauza mezi zásilkami od … (s)
     pauseMax: 20,     // … do (s)
   };
@@ -231,37 +232,112 @@
       }
       sur.set(v, s); def.set(v, d);
     }
+    const Z = () => ({ wood: 0, stone: 0, iron: 0 });
+    const ships = new Map();   // "odkud>kam" -> zásilka (víc dávek mezi stejnými vesnicemi se sloučí)
     const capLeft = new Map(vs.map(v => [v, (v.merchants || 0) * cfg.cap]));
-
+    const recv = new Map(vs.map(v => [v, Z()])), out = new Map(vs.map(v => [v, Z()]));
+    const addShip = (a, b, d, send) => {
+      const key = a.id + '>' + b.id;
+      let sh = ships.get(key);
+      if (!sh) { sh = { v: a, to: b, d, send: Z(), total: 0, merchants: 0, key }; ships.set(key, sh); }
+      let sum = 0;
+      for (const r of RES) {
+        sh.send[r] += send[r]; sum += send[r];
+        sur.get(a)[r] -= send[r]; def.get(b)[r] -= send[r];
+        recv.get(b)[r] += send[r]; out.get(a)[r] += send[r];
+      }
+      capLeft.set(a, capLeft.get(a) - sum);
+      return sum;
+    };
     const pairs = [];
     for (const a of vs) {
-      const sa = sur.get(a);
-      if (!RES.some(r => sa[r] > 0) || !capLeft.get(a)) continue;
-      for (const b of vs) {
-        if (a === b) continue;
-        const db = def.get(b);
-        if (RES.some(r => sa[r] > 0 && db[r] > 0)) pairs.push({ a, b, d: dist(a, b) });
-      }
+      if (!RES.some(r => sur.get(a)[r] > 0) || !capLeft.get(a)) continue;
+      for (const b of vs) if (a !== b && RES.some(r => sur.get(a)[r] > 0 && def.get(b)[r] > 0)) pairs.push({ a, b, d: dist(a, b) });
     }
     pairs.sort((x, y) => x.d - y.d);
 
-    for (const { a, b, d } of pairs) {
-      const sa = sur.get(a), db = def.get(b);
-      const cap = capLeft.get(a);
-      if (cap < cfg.minSend) continue;
-      const want = {};
-      let total = 0;
-      for (const r of RES) { want[r] = Math.min(sa[r], db[r]); total += want[r]; }
-      if (total <= 0) continue;
-      const k = total > cap ? cap / total : 1;   // málo obchodníků -> poměrně zkrátit
-      const send = {};
-      let sum = 0;
-      for (const r of RES) { send[r] = Math.floor(want[r] * k / 100) * 100; sum += send[r]; }
-      if (sum < cfg.minSend) continue;
-      for (const r of RES) { sa[r] -= send[r]; db[r] -= send[r]; }
-      capLeft.set(a, cap - sum);
-      plan.ships.push({ v: a, to: b, d, send, total: sum, merchants: Math.ceil(sum / cfg.cap), key: a.id + '>' + b.id });
+    if (!cfg.mix) {
+      // každá surovina zvlášť (původní chování)
+      for (const { a, b, d } of pairs) {
+        const sa = sur.get(a), db = def.get(b);
+        const cap = capLeft.get(a);
+        if (cap < cfg.minSend) continue;
+        const want = {};
+        let total = 0;
+        for (const r of RES) { want[r] = Math.max(0, Math.min(sa[r], db[r])); total += want[r]; }
+        if (total <= 0) continue;
+        const k = total > cap ? cap / total : 1;   // málo obchodníků -> poměrně zkrátit
+        const send = Z();
+        let sum = 0;
+        for (const r of RES) { send[r] = Math.floor(want[r] * k / 100) * 100; sum += send[r]; }
+        if (sum < cfg.minSend) continue;
+        addShip(a, b, d, send);
+      }
+    } else {
+      // VYROVNÁVÁNÍ I MEZI SUROVINAMI
+      // Úroveň suroviny = kolik % svého cíle vesnice má (cíl = stejné % skladu jako celkový průměr).
+      // Žádná surovina se do vesnice nepošle víc než o krok nad tu, které má vesnice nejméně
+      // → nedostatková surovina (třeba železo) má přednost; když ji není odkud vzít, nejde tam ani dřevo.
+      // Suroviny se přidávají po krocích (víc kol), aby se vesnice zvedala rovnoměrně, i když je vozí různé vesnice.
+      const STEP = 0.05;   // krok = 5 % cíle
+      const tgt = (v, r) => plan.f[r] * v.storage;
+      const frac = (v, r) => (tgt(v, r) > 0 ? ((v[r] || 0) + recv.get(v)[r] - out.get(v)[r]) / tgt(v, r) : Infinity);
+      // dávka z a do b: všechny suroviny, které a může dát, zvednout na společnou úroveň T
+      const bundle = (a, b, cap) => {
+        const sa = sur.get(a), db = def.get(b);
+        const cur = {}, ceil = {}, give = [];
+        let limit = 1;   // nad cíl nikdy
+        for (const r of RES) {
+          if (!(tgt(b, r) > 0)) continue;
+          cur[r] = frac(b, r);
+          const room = Math.max(0, Math.min(sa[r], db[r]));
+          ceil[r] = cur[r] + room / tgt(b, r);
+          if (room >= 100) give.push(r);
+          // surovina, kterou tahle dávka nevozí a má jí vesnice málo, drží strop ostatních
+          else if (cur[r] < 1) limit = Math.min(limit, cur[r] + STEP);
+        }
+        if (!give.length) return null;
+        // surovina, které má odesílatel málo (zastaví se pod ostatními), taky drží strop
+        const levelAt = (T) => {
+          const top = Math.min(T, limit);
+          let lim2 = top;
+          for (const r of give) if (ceil[r] < top) lim2 = Math.min(lim2, ceil[r] + STEP);
+          return lim2;
+        };
+        const amountAt = (T) => { const L = levelAt(T); return give.reduce((s, r) => s + Math.max(0, (Math.min(L, ceil[r]) - cur[r]) * tgt(b, r)), 0); };
+        let lo = Math.min(...give.map(r => cur[r])), hi = Math.max(limit, lo);
+        if (amountAt(hi) > cap) { for (let it = 0; it < 50; it++) { const mid = (lo + hi) / 2; if (amountAt(mid) > cap) hi = mid; else lo = mid; } }
+        else lo = hi;
+        const L = levelAt(lo);
+        const send = Z();
+        for (const r of give) send[r] = Math.floor(Math.max(0, (Math.min(L, ceil[r]) - cur[r]) * tgt(b, r)) / 100) * 100;
+        return send;
+      };
+      // kola: v každém dostane každá vesnice krok od nejbližších, dokud je co posílat
+      for (let round = 0; round < 80; round++) {
+        let moved = 0;
+        for (const { a, b, d } of pairs) {
+          const cap = capLeft.get(a);
+          if (cap < 100) continue;
+          const send = bundle(a, b, cap);
+          if (!send) continue;
+          const sum = send.wood + send.stone + send.iron;
+          if (sum < 100) continue;
+          moved += addShip(a, b, d, send);
+        }
+        if (moved < 100) break;
+      }
+      // malé zásilky pod minimum zrušit (víc je jich dohromady málo – nevyplatí se obchodníci)
+      for (const [key, sh] of ships) {
+        const tot = sh.send.wood + sh.send.stone + sh.send.iron;
+        if (tot >= cfg.minSend) continue;
+        for (const r of RES) { sur.get(sh.v)[r] += sh.send[r]; def.get(sh.to)[r] += sh.send[r]; recv.get(sh.to)[r] -= sh.send[r]; out.get(sh.v)[r] -= sh.send[r]; }
+        capLeft.set(sh.v, capLeft.get(sh.v) + tot);
+        ships.delete(key);
+      }
     }
+    for (const sh of ships.values()) { sh.total = sh.send.wood + sh.send.stone + sh.send.iron; sh.merchants = Math.ceil(sh.total / cfg.cap); }
+    plan.ships = [...ships.values()].filter(sh => sh.total > 0).sort((x, y) => x.d - y.d);
 
     // stav po balancu (pro přehled vesnic)
     for (const v of vs) plan.after.set(v, { wood: v.wood || 0, stone: v.stone || 0, iron: v.iron || 0 });
@@ -363,6 +439,7 @@
           <div class="opts">
           <label>Nechat ve vesnici aspoň <input type="number" data-reserve min="0" step="1000" style="width:80px"> každé</label>
           <label>Neřešit rozdíl pod <input type="number" data-tol min="0" max="50" step="1" style="width:50px"> % skladu</label>
+          <label title="Když má vesnice třeba 11k dřeva a 1k železa, má přednost železo. Dřevo (ani hlína) se do ní nepošle nad úroveň železa – když železo není odkud vzít, nepošle se ani dřevo."><input type="checkbox" data-mix> Vyrovnávat i suroviny mezi sebou (nedostatková má přednost)</label>
           <label>Min. zásilka <input type="number" data-min min="0" step="500" style="width:70px"></label>
           <label>Nosnost obchodníka <input type="number" data-cap min="100" step="100" style="width:70px"></label>
           <label>Pauza u „Poslat vše“ <input type="number" data-pmin min="0" style="width:50px"> – <input type="number" data-pmax min="0" style="width:50px"> s</label>
@@ -402,6 +479,9 @@
     bindNum('[data-cap]', 'cap', 100);
     bindNum('[data-pmin]', 'pauseMin', 0);
     bindNum('[data-pmax]', 'pauseMax', 0);
+    const mixCb = ui.q('[data-mix]');
+    mixCb.checked = cfg.mix !== false;
+    mixCb.onchange = () => { cfg.mix = mixCb.checked; saveCfg(); replan(); };
     w.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) { e.preventDefault(); sendNext(); }
     });
@@ -454,6 +534,7 @@
         (todo.length
           ? `Zbývá <b>${todo.length}</b> zásilek: ${RES.map(r => `${RES_NAME[r]} ${fmt(tot[r])}`).join(' · ')}`
           : (plan.ships.length ? '✅ Všechno odesláno.' : '✅ Vesnice jsou vyrovnané – není co posílat (nebo chybí volní obchodníci).')) +
+        (cfg.mix ? `<div class="o">⚖️ Vyrovnává se i mezi surovinami: co vesnici chybí nejvíc (třeba železo), má přednost. Jiná surovina se do ní nepošle nad úroveň té nedostatkové – když železo není odkud vzít, nejde tam ani dřevo.</div>` : '') +
         `<div class="o">Nikdy se nepošle víc, než se vejde do skladu příjemce. Suroviny, které už jsou na cestě, skript nevidí – po doručení klikni znovu na „Načíst“.</div>`;
 
     // vesnice: zaplnění teď → po balancu
